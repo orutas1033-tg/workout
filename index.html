@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover: iPhone のノッチ/ホームインジケータ領域まで背景を敷くため -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12151A">
+<!-- iOS でホーム画面に追加したときにスタンドアロン起動させる -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>筋トレメモ</title>
+<link rel="manifest" href="manifest.json">
+
+<style>
+/* =====================================================================
+   デザイントークン
+   - 外部フォント/CDN は一切使わない（オフライン要件）。
+     そのため書体で個性を出せないので、「数値の見せ方」を主役にする。
+   - 配色: 暗いインク色ベース + 真鍮色（プレートの色）のアクセント1色のみ。
+   ===================================================================== */
+:root {
+  --ink:        #12151A;  /* 背景（最も暗い） */
+  --surface:    #1B2027;  /* カード面 */
+  --surface-2:  #232A33;  /* 入力欄・押下面 */
+  --line:       #2C333D;  /* 罫線 */
+  --text:       #E8ECF1;  /* 本文 */
+  --muted:      #8D97A5;  /* 補助テキスト */
+  --accent:     #F0B429;  /* アクセント（真鍮色）。ここぞという1箇所だけに使う */
+  --danger:     #E5484D;  /* 破壊的操作 */
+  --ok:         #3DD68C;
+
+  --radius: 10px;
+  --tap: 44px;            /* iOS の推奨最小タップ領域 */
+
+  /* 数字用フォント: 桁が揃うように等幅系を優先 */
+  --font-num: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+             "Yu Gothic", "Noto Sans JP", sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 16px;               /* iOS で入力時に自動ズームされないよう 16px を下回らせない */
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* すべての数字を等幅・桁揃えに（このアプリの視覚的な芯） */
+.num, input[type="number"], .set-table {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---------- レイアウト ---------- */
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 16px;
+  /* 下部ナビの高さ + iPhone のホームインジケータ分を確保 */
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+header.app-header {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--ink);
+  padding: calc(12px + env(safe-area-inset-top)) 0 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.app-title { font-size: 17px; font-weight: 700; letter-spacing: .04em; margin: 0; }
+.app-title .mark { color: var(--accent); }
+.app-sub { font-size: 12px; color: var(--muted); }
+
+/* ---------- 下部タブナビ ---------- */
+nav.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex;
+  background: rgba(18,21,26,.94);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+nav.tabbar button {
+  flex: 1;
+  min-height: var(--tap);
+  padding: 10px 4px 8px;
+  background: none; border: none;
+  color: var(--muted);
+  font-family: inherit; font-size: 11px; letter-spacing: .06em;
+  cursor: pointer;
+  border-top: 2px solid transparent;
+  margin-top: -1px;
+}
+nav.tabbar button[aria-current="page"] {
+  color: var(--text);
+  border-top-color: var(--accent);
+}
+nav.tabbar .tab-glyph { display: block; font-size: 18px; line-height: 1.2; }
+
+/* ---------- 汎用パーツ ---------- */
+.section { padding: 20px 0; }
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+h2.section-title {
+  margin: 0;
+  font-size: 12px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit; font-size: 15px; font-weight: 600;
+  cursor: pointer;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: var(--accent); color: #1A1400; border-color: var(--accent);
+}
+.btn-danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+.btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; font-weight: 500; }
+.btn-block { display: block; width: 100%; }
+.btn:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+label.field { display: block; margin-bottom: 12px; }
+label.field > span {
+  display: block; margin-bottom: 6px;
+  font-size: 12px; color: var(--muted); letter-spacing: .04em;
+}
+input[type="text"], input[type="number"], input[type="date"], select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-ui); font-size: 16px;
+  appearance: none;
+}
+.check {
+  display: flex; align-items: center; gap: 10px;
+  min-height: var(--tap);
+  font-size: 15px;
+}
+.check input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.muted { color: var(--muted); }
+.empty {
+  padding: 28px 16px; text-align: center;
+  color: var(--muted); font-size: 14px;
+  border: 1px dashed var(--line); border-radius: var(--radius);
+}
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stack-sm > * + * { margin-top: 8px; }
+
+/* バックアップ警告バー */
+.warnbar {
+  display: flex; align-items: center; gap: 12px;
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: rgba(240,180,41,.08);
+  font-size: 13px;
+}
+.warnbar strong { color: var(--accent); }
+.warnbar .btn { flex-shrink: 0; }
+
+/* 種目カード */
+.ex-item { display: flex; align-items: center; gap: 12px; }
+.ex-main { flex: 1; min-width: 0; }
+.ex-name { font-size: 16px; font-weight: 600; }
+.ex-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ex-last { font-family: var(--font-num); font-variant-numeric: tabular-nums;
+           font-size: 13px; color: var(--text); }
+.badge {
+  display: inline-block;
+  padding: 1px 6px; margin-left: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  font-size: 10px; letter-spacing: .06em; color: var(--muted);
+  vertical-align: 1px;
+}
+.badge-uni { color: var(--accent); border-color: var(--accent); }
+.is-inactive .ex-name { color: var(--muted); text-decoration: line-through; }
+
+/* モーダル */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 30;
+  background: rgba(0,0,0,.6);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.modal {
+  width: 100%; max-width: 640px;
+  background: var(--surface);
+  border-top: 2px solid var(--accent);
+  border-radius: 14px 14px 0 0;
+  padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+  max-height: 90vh; overflow-y: auto;
+}
+.modal h3 { margin: 0 0 16px; font-size: 16px; }
+@media (prefers-reduced-motion: no-preference) {
+  .modal { animation: slideup .18s ease-out; }
+  @keyframes slideup { from { transform: translateY(16px); opacity: 0; } }
+}
+
+/* トースト */
+.toast {
+  position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom));
+  transform: translateX(-50%); z-index: 40;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 10px 18px;
+  font-size: 14px; white-space: nowrap;
+}
+
+.hidden { display: none !important; }
+</style>
+</head>
+
+<body>
+
+<div class="app">
+  <header class="app-header">
+    <h1 class="app-title"><span class="mark">▮</span> 筋トレメモ</h1>
+    <span class="app-sub" id="storage-status"></span>
+  </header>
+
+  <main id="view"><!-- 画面はここに描画される --></main>
+</div>
+
+<nav class="tabbar" id="tabbar">
+  <button data-tab="home"><span class="tab-glyph">▤</span>ホーム</button>
+  <button data-tab="exercises"><span class="tab-glyph">▦</span>種目</button>
+  <button data-tab="settings"><span class="tab-glyph">▩</span>設定</button>
+</nav>
+
+<div id="modal-root"></div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. 定数とユーティリティ
+   ===================================================================== */
+
+const STORAGE_KEY    = "kintore-memo";  // localStorage のキー（オリジン単位で保持される）
+const SCHEMA_VERSION = 1;               // データ構造のバージョン。将来の移行判定に使う
+const BACKUP_WARN_DAYS = 14;            // 最終エクスポートからこの日数を過ぎたら警告を出す
+
+// 一意なIDを作る。表示には一切使わず、参照専用（種目のリネームで履歴が切れないようにするため）
+function genId(prefix) {
+  return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// YYYY-MM-DD 形式の今日の日付（タイムゾーンずれを避けるためローカル値から組み立てる）
+function todayStr() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// HTML エスケープ（種目名をそのまま innerHTML に入れると壊れるため必ず通す）
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+// 簡易トースト表示
+let toastTimer = null;
+function toast(msg) {
+  document.querySelector(".toast")?.remove();
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 2200);
+}
+
+
+/* =====================================================================
+   2. 派生値の計算（保存はせず、常に記録から計算する）
+      - ここを関数に切り出しておくと、画面・CSV出力の双方から使い回せる
+   ===================================================================== */
+
+// セットのボリューム。片方ずつ(isUnilateral)の場合は左右を合算するため 2 倍する。
+//   例: 60kg × 10回 を左右それぞれ → 60 * 10 * 2 = 1200
+function setVolume(s) {
+  if (s.weightKg == null || s.reps == null) return 0;
+  return s.weightKg * s.reps * (s.isUnilateral ? 2 : 1);
+}
+
+// 推定1RM（Epley式）。高レップからの外挿は誤差が大きいので、画面では「参考値」と明記する。
+function estimate1RM(weightKg, reps) {
+  if (weightKg == null || reps == null || reps < 1) return null;
+  return weightKg * (1 + reps / 30);
+}
+
+// ワークアウト全体の総ボリューム
+function workoutVolume(w) {
+  return (w.sets || []).reduce((sum, s) => sum + setVolume(s), 0);
+}
+
+
+/* =====================================================================
+   3. データ層（localStorage への読み書き）
+
+      重要な前提:
+      localStorage は「保管庫」ではなく「キャッシュ」として扱う。
+      iOS Safari は条件次第でストレージを削除しうるため、
+      JSON エクスポートによるバックアップを必須機能としている（設定タブ）。
+   ===================================================================== */
+
+let db = null;             // メモリ上の唯一のデータ実体
+let storageOK = true;      // localStorage が使えない環境（プライベートブラウズ等）の検出用
+
+// 空のデータベースを作る
+function emptyDB() {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    exercises: [],
+    workouts: [],
+    meta: { lastExportedAt: null }
+  };
+}
+
+// 読み込んだ生データが最低限の形を満たしているか検証する（インポート時にも使う）
+function validateDB(obj) {
+  if (!obj || typeof obj !== "object") return "データがオブジェクトではありません";
+  if (typeof obj.schemaVersion !== "number") return "schemaVersion がありません";
+  if (obj.schemaVersion > SCHEMA_VERSION) {
+    return `新しい形式のデータです（v${obj.schemaVersion}）。アプリを更新してください`;
+  }
+  if (!Array.isArray(obj.exercises)) return "exercises が配列ではありません";
+  if (!Array.isArray(obj.workouts))  return "workouts が配列ではありません";
+  return null; // 問題なし
+}
+
+// localStorage から読み込む。壊れていたら空データで起動する（アプリが開かなくなるのを防ぐ）
+function loadDB() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) { db = emptyDB(); return; }
+    const obj = JSON.parse(raw);
+    const err = validateDB(obj);
+    if (err) {
+      console.error("保存データが不正:", err);
+      alert("保存データを読み込めませんでした。空の状態で起動します。\n（バックアップJSONがあれば、設定タブから復元してください）");
+      db = emptyDB();
+      return;
+    }
+    db = obj;
+    db.meta = db.meta || { lastExportedAt: null };
+  } catch (e) {
+    console.error(e);
+    storageOK = false;
+    db = emptyDB();
+  }
+}
+
+// 保存する。失敗（容量超過・ストレージ無効）は握りつぶさず必ず知らせる
+function saveDB() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    storageOK = true;
+  } catch (e) {
+    console.error(e);
+    storageOK = false;
+    toast("保存できませんでした。設定タブからバックアップを取ってください");
+  }
+  renderStorageStatus();
+}
+
+// 最終エクスポートからの経過日数（未エクスポートなら null）
+function daysSinceExport() {
+  if (!db.meta.lastExportedAt) return null;
+  const diff = Date.now() - new Date(db.meta.lastExportedAt).getTime();
+  return Math.floor(diff / 86400000);
+}
+
+// バックアップ警告を出すべきか
+function needsBackupWarning() {
+  if (db.workouts.length === 0) return false;   // 記録が無いうちは黙っている
+  const d = daysSinceExport();
+  return d === null || d >= BACKUP_WARN_DAYS;
+}
+
+
+/* =====================================================================
+   4. 種目マスタの操作
+      - 物理削除は提供しない。isActive=false で選択肢から隠すのみ。
+        （過去の記録が参照している exerciseId を壊さないため）
+   ===================================================================== */
+
+function addExercise({ name, kind, isUnilateral }) {
+  const ex = {
+    id: genId("ex"),
+    name: name.trim(),
+    kind,                       // "strength" | "endurance"
+    isUnilateral: !!isUnilateral,
+    isActive: true
+  };
+  db.exercises.push(ex);
+  saveDB();
+  return ex;
+}
+
+function updateExercise(id, patch) {
+  const ex = db.exercises.find((e) => e.id === id);
+  if (!ex) return;
+  Object.assign(ex, patch);
+  if (ex.name) ex.name = ex.name.trim();
+  saveDB();
+}
+
+function getExercise(id) {
+  return db.exercises.find((e) => e.id === id) || null;
+}
+
+// 同名の種目が既にあるか（大文字小文字・前後空白を無視して判定）
+function isDuplicateName(name, exceptId) {
+  const key = name.trim().toLowerCase();
+  return db.exercises.some((e) => e.id !== exceptId && e.name.trim().toLowerCase() === key);
+}
+
+// ある種目を含む「直近のワークアウト」を返す（オートフィルと一覧表示で使う）
+// 日付の降順で探し、同日が複数あれば配列の後ろ（＝後から作られたもの）を優先する
+function findLastWorkoutWithExercise(exerciseId) {
+  const hits = db.workouts.filter((w) => (w.sets || []).some((s) => s.exerciseId === exerciseId));
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return hits[hits.length - 1];
+}
+
+// 種目一覧に出す「直近の代表記録」の文字列を作る
+function lastRecordLabel(exerciseId) {
+  const w = findLastWorkoutWithExercise(exerciseId);
+  if (!w) return null;
+  const sets = w.sets.filter((s) => s.exerciseId === exerciseId);
+  const ex = getExercise(exerciseId);
+  if (!ex) return null;
+
+  if (ex.kind === "strength") {
+    // 最も重い重量のセットを代表として表示する
+    const top = sets.reduce((a, b) => (setVolume(b) > setVolume(a) ? b : a), sets[0]);
+    const uni = top.isUnilateral ? " ×左右" : "";
+    return `${w.date}　${top.weightKg}kg × ${top.reps}${uni}　全${sets.length}セット`;
+  } else {
+    const totSec = sets.reduce((s, x) => s + (x.durationSec || 0), 0);
+    const totKm  = sets.reduce((s, x) => s + (x.distanceKm  || 0), 0);
+    const min = Math.round(totSec / 60);
+    return `${w.date}　${min}分 / ${totKm}km`;
+  }
+}
+
+
+/* =====================================================================
+   5. エクスポート / インポート（このアプリの生命線）
+   ===================================================================== */
+
+// Blob をダウンロードさせる共通処理
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 解放は少し遅らせる（即時 revoke すると iOS で保存に失敗することがある）
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// JSON エクスポート（＝バックアップの正本。これだけが完全な復元手段）
+function exportJSON() {
+  db.meta.lastExportedAt = new Date().toISOString();
+  saveDB();
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `kintore-backup-${todayStr()}.json`);
+  toast("JSONを書き出しました");
+  render();
+}
+
+// CSV の1セル分をエスケープ（カンマ・引用符・改行を含む値に対応）
+function csvCell(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// CSV エクスポート（1行1セットのフラット形式。pandas にそのまま読ませる想定）
+function exportCSV() {
+  const header = [
+    "date", "workout_duration_min", "exercise_name", "kind", "set_no",
+    "weight_kg", "reps", "is_unilateral", "rpe",
+    "duration_sec", "distance_km", "volume"
+  ];
+  const rows = [header.join(",")];
+
+  // 日付順に並べてから展開する
+  const sorted = [...db.workouts].sort((a, b) => (a.date < b.date ? -1 : 1));
+  for (const w of sorted) {
+    for (const s of (w.sets || [])) {
+      const ex = getExercise(s.exerciseId);
+      rows.push([
+        w.date,
+        w.durationMin,
+        ex ? ex.name : "(削除済み種目)",
+        ex ? ex.kind : "",
+        s.setNo,
+        s.weightKg ?? "",
+        s.reps ?? "",
+        s.isUnilateral ? 1 : 0,
+        s.rpe ?? "",                 // RPE は任意入力なので空欄になりうる
+        s.durationSec ?? "",
+        s.distanceKm ?? "",
+        setVolume(s) || ""
+      ].map(csvCell).join(","));
+    }
+  }
+
+  // BOM を付ける: Excel で開いたときに日本語が文字化けしないため
+  const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  downloadBlob(blob, `kintore-${todayStr()}.csv`);
+  toast("CSVを書き出しました");
+}
+
+// JSON インポート（現在のデータを完全に置き換える。必ず確認を挟む）
+function importJSON(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let obj;
+    try {
+      obj = JSON.parse(reader.result);
+    } catch {
+      alert("JSONとして読めませんでした。ファイルが壊れている可能性があります。");
+      return;
+    }
+    const err = validateDB(obj);
+    if (err) { alert("読み込めません: " + err); return; }
+
+    const msg =
+      "現在のデータをすべて置き換えます。この操作は取り消せません。\n\n" +
+      `読み込むデータ: ワークアウト ${obj.workouts.length} 件 / 種目 ${obj.exercises.length} 件\n` +
+      `現在のデータ　: ワークアウト ${db.workouts.length} 件 / 種目 ${db.exercises.length} 件\n\n` +
+      "続けますか？";
+    if (!confirm(msg)) return;
+
+    db = obj;
+    db.meta = db.meta || { lastExportedAt: null };
+    saveDB();
+    toast("復元しました");
+    render();
+  };
+  reader.readAsText(file);
+}
+
+
+/* =====================================================================
+   6. 画面描画
+   ===================================================================== */
+
+let currentTab = "home";
+const view = document.getElementById("view");
+
+// ヘッダ右上に保存状態を出す（localStorage が死んでいることに気づけるように）
+function renderStorageStatus() {
+  const el = document.getElementById("storage-status");
+  el.textContent = storageOK ? "" : "⚠ 保存不可";
+  el.style.color = "var(--danger)";
+}
+
+// バックアップ警告バーの HTML
+function warnbarHTML() {
+  if (!needsBackupWarning()) return "";
+  const d = daysSinceExport();
+  const detail = d === null
+    ? "まだ一度もバックアップしていません。"
+    : `最後のバックアップから ${d} 日経過しています。`;
+  return `
+    <div class="warnbar">
+      <div><strong>バックアップ</strong>　${esc(detail)}<br>
+        <span class="muted">端末のデータは消えることがあります。</span></div>
+      <button class="btn btn-sm" data-act="export-json">書き出す</button>
+    </div>`;
+}
+
+/* ---------- ホームタブ ---------- */
+function renderHome() {
+  const recent = [...db.workouts].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 10);
+
+  const list = recent.length === 0
+    ? `<div class="empty">まだ記録がありません。<br>まず「種目」タブで種目を登録してください。</div>`
+    : recent.map((w) => {
+        const exCount = new Set(w.sets.map((s) => s.exerciseId)).size;
+        return `
+          <div class="card">
+            <div class="row-between">
+              <div>
+                <div class="num" style="font-size:15px;font-weight:600">${esc(w.date)}</div>
+                <div class="ex-meta">${w.durationMin}分　種目 ${exCount}　セット ${w.sets.length}</div>
+              </div>
+              <div class="ex-last">${Math.round(workoutVolume(w)).toLocaleString()} kg</div>
+            </div>
+          </div>`;
+      }).join("");
+
+  view.innerHTML = `
+    ${warnbarHTML()}
+    <section class="section">
+      <button class="btn btn-primary btn-block" data-act="new-workout">＋ 今日のワークアウトを記録</button>
+    </section>
+    <section class="section">
+      <div class="section-head"><h2 class="section-title">最近のワークアウト</h2></div>
+      ${list}
+    </section>`;
+}
+
+/* ---------- 種目タブ ---------- */
+let showInactive = false;
+
+function renderExercises() {
+  const items = db.exercises.filter((e) => showInactive || e.isActive);
+
+  const list = items.length === 0
+    ? `<div class="empty">種目がありません。<br>右上の「＋ 追加」から登録してください。</div>`
+    : items.map((e) => {
+        const last = lastRecordLabel(e.id);
+        const kindLabel = e.kind === "strength" ? "筋力" : "持久";
+        return `
+          <div class="card ex-item ${e.isActive ? "" : "is-inactive"}">
+            <div class="ex-main">
+              <div class="ex-name">${esc(e.name)}<span class="badge">${kindLabel}</span>${
+                e.isUnilateral ? '<span class="badge badge-uni">片側</span>' : ""
+              }</div>
+              <div class="ex-meta">${last ? `<span class="ex-last">${esc(last)}</span>` : "記録なし"}</div>
+            </div>
+            <button class="btn btn-sm" data-act="edit-ex" data-id="${e.id}">編集</button>
+          </div>`;
+      }).join("");
+
+  view.innerHTML = `
+    <section class="section">
+      <div class="section-head">
+        <h2 class="section-title">種目 (${items.length})</h2>
+        <button class="btn btn-sm btn-primary" data-act="add-ex">＋ 追加</button>
+      </div>
+      ${list}
+      <label class="check" style="margin-top:12px">
+        <input type="checkbox" id="chk-inactive" ${showInactive ? "checked" : ""}>
+        <span class="muted">使っていない種目も表示する</span>
+      </label>
+    </section>`;
+
+  document.getElementById("chk-inactive").addEventListener("change", (ev) => {
+    showInactive = ev.target.checked;
+    renderExercises();
+  });
+}
+
+/* ---------- 種目の追加 / 編集モーダル ---------- */
+function openExerciseModal(id) {
+  const ex = id ? getExercise(id) : null;
+  const isNew = !ex;
+
+  document.getElementById("modal-root").innerHTML = `
+    <div class="modal-backdrop" data-act="close-modal">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3>${isNew ? "種目を追加" : "種目を編集"}</h3>
+
+        <label class="field">
+          <span>種目名</span>
+          <input type="text" id="ex-name" value="${esc(ex ? ex.name : "")}"
+                 placeholder="例: ベンチプレス" autocomplete="off">
+        </label>
+
+        <label class="field">
+          <span>種別</span>
+          <select id="ex-kind">
+            <option value="strength" ${ex && ex.kind === "endurance" ? "" : "selected"}>筋力（重量・回数）</option>
+            <option value="endurance" ${ex && ex.kind === "endurance" ? "selected" : ""}>持久（時間・距離）</option>
+          </select>
+        </label>
+        <p class="muted" style="font-size:12px;margin:-6px 0 12px">
+          ${ex ? "種別を変えても過去の記録は書き換わりません。" : "後から変更できます。"}
+        </p>
+
+        <label class="check" id="wrap-uni">
+          <input type="checkbox" id="ex-uni" ${ex && ex.isUnilateral ? "checked" : ""}>
+          <span>片方ずつ行う種目（左右を合算して集計）</span>
+        </label>
+
+        ${isNew ? "" : `
+          <label class="check">
+            <input type="checkbox" id="ex-active" ${ex.isActive ? "checked" : ""}>
+            <span>記録画面の選択肢に表示する</span>
+          </label>
+          <p class="muted" style="font-size:12px;margin:-4px 0 12px">
+            チェックを外しても過去の記録は残ります。種目の削除機能はありません。
+          </p>`}
+
+        <div class="stack-sm" style="margin-top:20px">
+          <button class="btn btn-primary btn-block" data-act="save-ex" data-id="${ex ? ex.id : ""}">保存する</button>
+          <button class="btn btn-block" data-act="close-modal">キャンセル</button>
+        </div>
+      </div>
+    </div>`;
+
+  // 持久系のときは「片方ずつ」の概念が無いので隠す
+  const kindSel = document.getElementById("ex-kind");
+  const wrapUni = document.getElementById("wrap-uni");
+  const syncUni = () => wrapUni.classList.toggle("hidden", kindSel.value === "endurance");
+  kindSel.addEventListener("change", syncUni);
+  syncUni();
+
+  document.getElementById("ex-name").focus();
+}
+
+function closeModal() {
+  document.getElementById("modal-root").innerHTML = "";
+}
+
+function saveExerciseFromModal(id) {
+  const name = document.getElementById("ex-name").value.trim();
+  const kind = document.getElementById("ex-kind").value;
+  const uni  = kind === "strength" && document.getElementById("ex-uni").checked;
+  const activeEl = document.getElementById("ex-active");
+
+  if (!name) { alert("種目名を入力してください。"); return; }
+  if (isDuplicateName(name, id || null)) {
+    alert("同じ名前の種目が既にあります。別の名前にしてください。");
+    return;
+  }
+
+  if (id) {
+    updateExercise(id, { name, kind, isUnilateral: uni, isActive: activeEl.checked });
+    toast("保存しました");
+  } else {
+    addExercise({ name, kind, isUnilateral: uni });
+    toast("種目を追加しました");
+  }
+  closeModal();
+  renderExercises();
+}
+
+/* ---------- 設定タブ ---------- */
+function renderSettings() {
+  const d = daysSinceExport();
+  const backupLine = db.meta.lastExportedAt
+    ? `最終バックアップ: ${db.meta.lastExportedAt.slice(0, 10)}（${d}日前）`
+    : "まだバックアップしていません";
+
+  view.innerHTML = `
+    ${warnbarHTML()}
+
+    <section class="section">
+      <div class="section-head"><h2 class="section-title">バックアップ</h2></div>
+      <div class="card">
+        <p style="margin:0 0 4px;font-size:14px">JSONで書き出す</p>
+        <p class="muted" style="margin:0 0 12px;font-size:13px">
+          全データを1ファイルに保存します。<strong>これが唯一の完全な復元手段です。</strong>
+          iPhoneでは「ファイル」アプリやiCloud Driveに保存してください。
+        </p>
+        <p class="muted num" style="margin:0 0 12px;font-size:12px">${esc(backupLine)}</p>
+        <button class="btn btn-primary btn-block" data-act="export-json">JSONを書き出す</button>
+      </div>
+
+      <div class="card">
+        <p style="margin:0 0 4px;font-size:14px">JSONから復元する</p>
+        <p class="muted" style="margin:0 0 12px;font-size:13px">
+          書き出したJSONを読み込みます。<strong>現在のデータはすべて置き換わります。</strong>
+        </p>
+        <input type="file" id="import-file" accept="application/json,.json" class="hidden">
+        <button class="btn btn-block" data-act="import-json">ファイルを選ぶ</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2 class="section-title">解析用の書き出し</h2></div>
+      <div class="card">
+        <p style="margin:0 0 4px;font-size:14px">CSVで書き出す</p>
+        <p class="muted" style="margin:0 0 12px;font-size:13px">
+          1行1セットのフラット形式。pandas等での解析用です。
+          <strong>復元には使えません</strong>（種目マスタが含まれないため）。
+        </p>
+        <button class="btn btn-block" data-act="export-csv">CSVを書き出す</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2 class="section-title">データ</h2></div>
+      <div class="card num" style="font-size:13px">
+        <div class="row-between"><span class="muted">ワークアウト</span><span>${db.workouts.length}</span></div>
+        <div class="row-between"><span class="muted">セット記録</span><span>${db.workouts.reduce((n, w) => n + w.sets.length, 0)}</span></div>
+        <div class="row-between"><span class="muted">種目</span><span>${db.exercises.length}</span></div>
+        <div class="row-between"><span class="muted">形式バージョン</span><span>v${db.schemaVersion}</span></div>
+      </div>
+    </section>`;
+
+  // ファイル選択 → インポート
+  const fileEl = document.getElementById("import-file");
+  fileEl.addEventListener("change", (ev) => {
+    const f = ev.target.files[0];
+    if (f) importJSON(f);
+    ev.target.value = "";   // 同じファイルを再選択できるようにリセット
+  });
+}
+
+/* ---------- タブ切り替え ---------- */
+function render() {
+  document.querySelectorAll("#tabbar button").forEach((b) => {
+    if (b.dataset.tab === currentTab) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+
+  if (currentTab === "home")           renderHome();
+  else if (currentTab === "exercises") renderExercises();
+  else if (currentTab === "settings")  renderSettings();
+
+  renderStorageStatus();
+  window.scrollTo(0, 0);
+}
+
+
+/* =====================================================================
+   7. イベント処理
+      画面を innerHTML で作り直すため、個別に addEventListener せず
+      document 全体で1回だけ受けて data-act で振り分ける（イベント委譲）
+   ===================================================================== */
+
+document.getElementById("tabbar").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-tab]");
+  if (!btn) return;
+  currentTab = btn.dataset.tab;
+  render();
+});
+
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-act]");
+  if (!el) return;
+
+  // モーダル背景のクリックだけで閉じる（モーダル内側のクリックでは閉じない）
+  if (el.dataset.act === "close-modal" && ev.target !== el) return;
+
+  switch (el.dataset.act) {
+    case "add-ex":      openExerciseModal(null); break;
+    case "edit-ex":     openExerciseModal(el.dataset.id); break;
+    case "save-ex":     saveExerciseFromModal(el.dataset.id || null); break;
+    case "close-modal": closeModal(); break;
+
+    case "export-json": exportJSON(); break;
+    case "export-csv":  exportCSV(); break;
+    case "import-json": document.getElementById("import-file").click(); break;
+
+    case "new-workout":
+      // フェーズ2で実装する
+      alert("ワークアウト記録画面は次のフェーズで実装します。");
+      break;
+  }
+});
+
+
+/* =====================================================================
+   8. 起動
+   ===================================================================== */
+
+loadDB();
+render();
+
+// Service Worker の登録（オフライン動作用）。
+// file:// で直接開いた場合は登録されないので、その場合も動くよう例外を握る。
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW未登録:", e));
+}
+</script>
+</body>
+</html>
