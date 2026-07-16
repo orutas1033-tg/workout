@@ -11,7 +11,7 @@
 
 // アプリを更新したら、この番号を必ず上げること。
 // 番号が変わると古いキャッシュが破棄され、新しいファイルが取り込まれる。
-const CACHE_NAME = "kintore-memo-v1";
+const CACHE_NAME = "kintore-memo-v2";
 
 // キャッシュ対象のファイル一覧
 const ASSETS = [
