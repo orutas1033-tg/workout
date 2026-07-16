@@ -237,6 +237,89 @@ input[type="text"], input[type="number"], input[type="date"], select {
   font-size: 14px; white-space: nowrap;
 }
 
+/* =====================================================================
+   ワークアウト編集画面（フェーズ2）
+   ===================================================================== */
+
+/* 編集中は下部タブを隠す（誤タップで編集から抜けてしまうのを防ぐ） */
+body.editing nav.tabbar { display: none; }
+
+/* 編集画面のヘッダ（キャンセル / タイトル / 保存） */
+.editor-bar {
+  position: sticky; top: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--ink);
+  padding: calc(10px + env(safe-area-inset-top)) 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.editor-bar .title { font-size: 14px; font-weight: 700; letter-spacing: .04em; }
+
+/* 種目ごとのブロック */
+.ex-block { margin-bottom: 12px; }
+.ex-block-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ex-block-name { font-size: 15px; font-weight: 600; }
+.ex-block-name .badge { vertical-align: 2px; }
+
+/* セット表 */
+.set-head, .set-row {
+  display: grid;
+  align-items: center;
+  gap: 6px;
+}
+/* 筋力系: [# | 重量 | 回数 | RPE | 片側 | 削除] */
+.set-head.strength, .set-row.strength {
+  grid-template-columns: 26px minmax(52px,1fr) 54px 50px 34px 30px;
+}
+/* 持久系: [# | 分 | 秒 | km | RPE | 削除] */
+.set-head.endurance, .set-row.endurance {
+  grid-template-columns: 26px 1fr 48px 1fr 50px 30px;
+}
+.set-head {
+  font-size: 10px; color: var(--muted); letter-spacing: .02em;
+  text-align: center; margin-bottom: 4px;
+}
+.set-row { margin-bottom: 6px; }
+.set-row .set-no {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  color: var(--muted); font-size: 13px; text-align: center;
+}
+/* セット表内の数値入力は小さく詰める。ただし iOS の自動ズームを避けるため 16px は維持 */
+.set-row input[type="number"] {
+  min-height: 40px; padding: 0 4px; text-align: center;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
+.set-row .uni-cell { display: flex; align-items: center; justify-content: center; }
+.set-row .uni-cell input { width: 22px; height: 22px; accent-color: var(--accent); margin: 0; }
+.set-row .del-cell button {
+  width: 30px; height: 40px; padding: 0;
+  background: none; border: none; color: var(--muted);
+  font-size: 18px; cursor: pointer;
+}
+.set-row .del-cell button:active { color: var(--danger); }
+
+.add-set {
+  width: 100%; min-height: 38px; margin-top: 4px;
+  background: none; border: 1px dashed var(--line); border-radius: var(--radius);
+  color: var(--muted); font-family: inherit; font-size: 13px; cursor: pointer;
+}
+.add-set:active { color: var(--text); border-color: var(--accent); }
+
+/* 種目ピッカー（モーダル内）の検索 + 一覧 */
+.picker-search { margin-bottom: 10px; }
+.picker-list { max-height: 46vh; overflow-y: auto; }
+.picker-item {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; min-height: var(--tap);
+  padding: 10px 12px; margin-bottom: 6px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); font-family: inherit; font-size: 15px; text-align: left; cursor: pointer;
+}
+.picker-item:active { border-color: var(--accent); }
+.picker-item .p-meta { font-size: 11px; color: var(--muted); }
+
 .hidden { display: none !important; }
 </style>
 </head>
@@ -449,9 +532,12 @@ function isDuplicateName(name, exceptId) {
 }
 
 // ある種目を含む「直近のワークアウト」を返す（オートフィルと一覧表示で使う）
-// 日付の降順で探し、同日が複数あれば配列の後ろ（＝後から作られたもの）を優先する
-function findLastWorkoutWithExercise(exerciseId) {
-  const hits = db.workouts.filter((w) => (w.sets || []).some((s) => s.exerciseId === exerciseId));
+// 日付の降順で探し、同日が複数あれば配列の後ろ（＝後から作られたもの）を優先する。
+// excludeId: 編集中のワークアウト自身を除外するために使う（自己参照オートフィルを防ぐ）
+function findLastWorkoutWithExercise(exerciseId, excludeId) {
+  const hits = db.workouts.filter((w) =>
+    w.id !== excludeId && (w.sets || []).some((s) => s.exerciseId === exerciseId)
+  );
   if (hits.length === 0) return null;
   hits.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return hits[hits.length - 1];
@@ -619,7 +705,8 @@ function renderHome() {
     : recent.map((w) => {
         const exCount = new Set(w.sets.map((s) => s.exerciseId)).size;
         return `
-          <div class="card">
+          <button class="card" data-act="edit-workout" data-id="${w.id}"
+                  style="display:block;width:100%;text-align:left;cursor:pointer;color:inherit;font-family:inherit">
             <div class="row-between">
               <div>
                 <div class="num" style="font-size:15px;font-weight:600">${esc(w.date)}</div>
@@ -627,7 +714,7 @@ function renderHome() {
               </div>
               <div class="ex-last">${Math.round(workoutVolume(w)).toLocaleString()} kg</div>
             </div>
-          </div>`;
+          </button>`;
       }).join("");
 
   view.innerHTML = `
@@ -831,8 +918,415 @@ function renderSettings() {
   });
 }
 
-/* ---------- タブ切り替え ---------- */
+/* =====================================================================
+   6.5 ワークアウト編集（フェーズ2の中核）
+
+   編集は「下書き(draft)」を作って行い、保存するまで db には反映しない。
+   これによりキャンセルで変更を破棄できる。
+
+   draft の構造（編集中だけ使う内部形式。保存時に schema の sets[] に変換する）:
+     {
+       id, _isNew,           // _isNew: まだ db に無い新規か
+       date, durationMin, memo,
+       blocks: [             // 種目ごとにセットをまとめて持つ（表示・並びの単位）
+         { exerciseId,
+           sets: [ { rpe, weightKg, reps, isUnilateral, durationSec, distanceKm } ] }
+       ]
+     }
+
+   ★入力欄は「非制御」にしている（1文字打つたびに再描画しない）。
+     再描画するとカーソルが飛ぶため。値は syncEditorToDraft() で
+     構造変更・保存の直前に DOM → draft へまとめて吸い上げる。
+   ===================================================================== */
+
+let editingWorkout = null;   // null = 編集していない。オブジェクト = 編集中
+
+// 既存ワークアウト(schema形式) → 編集用 blocks へ変換
+// 同じ種目のセットは、最初に登場した順を保ってひとつのブロックにまとめる
+function workoutToBlocks(w) {
+  const order = [];               // exerciseId の登場順
+  const map = new Map();          // exerciseId -> sets[]
+  for (const s of (w.sets || [])) {
+    if (!map.has(s.exerciseId)) { map.set(s.exerciseId, []); order.push(s.exerciseId); }
+    map.get(s.exerciseId).push({
+      rpe: s.rpe ?? null,
+      weightKg: s.weightKg ?? null,
+      reps: s.reps ?? null,
+      isUnilateral: !!s.isUnilateral,
+      durationSec: s.durationSec ?? null,
+      distanceKm: s.distanceKm ?? null
+    });
+  }
+  return order.map((exerciseId) => ({ exerciseId, sets: map.get(exerciseId) }));
+}
+
+// 編集用 blocks → schema の sets[] へ変換（setNo は種目ごとに 1 から振り直す）
+function blocksToSets(blocks) {
+  const sets = [];
+  for (const b of blocks) {
+    b.sets.forEach((s, i) => {
+      sets.push({
+        id: genId("st"),
+        exerciseId: b.exerciseId,
+        setNo: i + 1,
+        rpe: s.rpe ?? null,
+        weightKg: s.weightKg ?? null,
+        reps: s.reps ?? null,
+        isUnilateral: !!s.isUnilateral,
+        durationSec: s.durationSec ?? null,
+        distanceKm: s.distanceKm ?? null
+      });
+    });
+  }
+  return sets;
+}
+
+// 新規ワークアウトの下書きを作る（案A: 同じ日付でも常に新規）
+function startNewWorkout() {
+  editingWorkout = {
+    id: genId("wo"),
+    _isNew: true,
+    date: todayStr(),
+    durationMin: null,
+    memo: "",
+    blocks: []
+  };
+  document.body.classList.add("editing");
+  renderWorkoutEditor();
+}
+
+// 既存ワークアウトを編集する
+function startEditWorkout(id) {
+  const w = db.workouts.find((x) => x.id === id);
+  if (!w) return;
+  editingWorkout = {
+    id: w.id,
+    _isNew: false,
+    date: w.date,
+    durationMin: w.durationMin ?? null,
+    memo: w.memo || "",
+    blocks: workoutToBlocks(w)
+  };
+  document.body.classList.add("editing");
+  renderWorkoutEditor();
+}
+
+// 空セルの下書き行を1つ作る（種別に応じて）
+function blankSet() {
+  return { rpe: null, weightKg: null, reps: null, isUnilateral: false,
+           durationSec: null, distanceKm: null };
+}
+
+// 種目を下書きに追加する。ここで「前回値オートフィル」を行う。
+function addExerciseToDraft(exerciseId) {
+  const ex = getExercise(exerciseId);
+  if (!ex) return;
+
+  // 直近ワークアウト（編集中の自分自身は除外）を探して、その種目のセット群を複製
+  const last = findLastWorkoutWithExercise(exerciseId, editingWorkout.id);
+  let sets;
+  if (last) {
+    const prev = last.sets.filter((s) => s.exerciseId === exerciseId);
+    sets = prev.map((s) => ({
+      rpe: null,                       // ★RPE はコピーしない（その日の体調依存のため）
+      weightKg: s.weightKg ?? null,
+      reps: s.reps ?? null,
+      isUnilateral: !!s.isUnilateral,
+      durationSec: s.durationSec ?? null,
+      distanceKm: s.distanceKm ?? null
+    }));
+  } else {
+    // 履歴なし → 空の1行。片側フラグだけは種目マスタの既定値を引き継ぐ
+    const b = blankSet();
+    b.isUnilateral = !!ex.isUnilateral;
+    sets = [b];
+  }
+
+  editingWorkout.blocks.push({ exerciseId, sets });
+  closeModal();
+  renderWorkoutEditor();
+}
+
+// 画面の入力値を draft に吸い上げる（構造変更・保存の直前に必ず呼ぶ）
+function syncEditorToDraft() {
+  if (!editingWorkout) return;
+
+  const dateEl = document.getElementById("wo-date");
+  const durEl  = document.getElementById("wo-duration");
+  const memoEl = document.getElementById("wo-memo");
+  if (dateEl) editingWorkout.date = dateEl.value || todayStr();
+  if (durEl)  editingWorkout.durationMin = durEl.value === "" ? null : Number(durEl.value);
+  if (memoEl) editingWorkout.memo = memoEl.value;
+
+  // 各セット行を読み取る。data-b(ブロック番号) と data-s(セット番号) で位置を特定
+  document.querySelectorAll(".set-row").forEach((row) => {
+    const bi = Number(row.dataset.b);
+    const si = Number(row.dataset.s);
+    const block = editingWorkout.blocks[bi];
+    if (!block) return;
+    const set = block.sets[si];
+    if (!set) return;
+    const ex = getExercise(block.exerciseId);
+
+    const num = (sel) => {
+      const el = row.querySelector(sel);
+      if (!el || el.value === "") return null;
+      const v = Number(el.value);
+      return Number.isFinite(v) ? v : null;
+    };
+
+    set.rpe = num('[data-f="rpe"]');
+    if (ex && ex.kind === "endurance") {
+      const min = num('[data-f="min"]');
+      const sec = num('[data-f="sec"]');
+      set.durationSec = (min === null && sec === null) ? null : (min || 0) * 60 + (sec || 0);
+      set.distanceKm = num('[data-f="km"]');
+    } else {
+      set.weightKg = num('[data-f="weight"]');
+      set.reps = num('[data-f="reps"]');
+      const uni = row.querySelector('[data-f="uni"]');
+      set.isUnilateral = uni ? uni.checked : false;
+    }
+  });
+}
+
+// セット行を追加（直前の行の重量・回数・片側を引き継ぐと入力が楽なので複製する。RPEは引き継がない）
+function addSetRow(blockIndex) {
+  syncEditorToDraft();
+  const block = editingWorkout.blocks[blockIndex];
+  const prev = block.sets[block.sets.length - 1];
+  const ns = blankSet();
+  if (prev) {
+    ns.weightKg = prev.weightKg;
+    ns.reps = prev.reps;
+    ns.isUnilateral = prev.isUnilateral;
+    ns.durationSec = prev.durationSec;
+    ns.distanceKm = prev.distanceKm;
+    // rpe は引き継がない
+  }
+  block.sets.push(ns);
+  renderWorkoutEditor();
+}
+
+// セット行を削除
+function removeSetRow(blockIndex, setIndex) {
+  syncEditorToDraft();
+  const block = editingWorkout.blocks[blockIndex];
+  block.sets.splice(setIndex, 1);
+  // セットが0になったブロック（種目）は丸ごと外す
+  if (block.sets.length === 0) editingWorkout.blocks.splice(blockIndex, 1);
+  renderWorkoutEditor();
+}
+
+// 種目ブロックごと削除
+function removeBlock(blockIndex) {
+  syncEditorToDraft();
+  editingWorkout.blocks.splice(blockIndex, 1);
+  renderWorkoutEditor();
+}
+
+// 保存: 空（セットが1つも無い）なら破棄する
+function saveWorkout() {
+  syncEditorToDraft();
+  const d = editingWorkout;
+
+  const totalSets = d.blocks.reduce((n, b) => n + b.sets.length, 0);
+  if (totalSets === 0) {
+    // 何も記録がない → リストに出さない（案Aの二重タップ対策）
+    if (d._isNew) { toast("記録が空のため保存しませんでした"); }
+    else { toast("セットがありません"); return; }
+    exitEditor();
+    return;
+  }
+
+  const saved = {
+    id: d.id,
+    date: d.date || todayStr(),
+    durationMin: d.durationMin ?? 0,
+    memo: d.memo || "",
+    sets: blocksToSets(d.blocks)
+  };
+
+  if (d._isNew) {
+    db.workouts.push(saved);
+  } else {
+    const idx = db.workouts.findIndex((w) => w.id === d.id);
+    if (idx >= 0) db.workouts[idx] = saved; else db.workouts.push(saved);
+  }
+  saveDB();
+  toast("保存しました");
+  exitEditor();
+}
+
+// ワークアウトを削除（既存のみ）
+function deleteWorkout() {
+  const d = editingWorkout;
+  if (d._isNew) { exitEditor(); return; }
+  if (!confirm("このワークアウトを削除します。取り消せません。よろしいですか？")) return;
+  db.workouts = db.workouts.filter((w) => w.id !== d.id);
+  saveDB();
+  toast("削除しました");
+  exitEditor();
+}
+
+// 編集を終える（保存/破棄後の共通処理）
+function exitEditor() {
+  editingWorkout = null;
+  document.body.classList.remove("editing");
+  currentTab = "home";
+  render();
+}
+
+// キャンセル（変更があれば確認）
+function cancelEditor() {
+  syncEditorToDraft();
+  const hasContent = editingWorkout.blocks.some((b) => b.sets.length > 0);
+  if (hasContent && !confirm("編集を破棄します。よろしいですか？")) return;
+  exitEditor();
+}
+
+// 1セット行の HTML
+function setRowHTML(ex, set, bi, si) {
+  const v = (x) => (x === null || x === undefined ? "" : x);
+  if (ex.kind === "endurance") {
+    const min = set.durationSec != null ? Math.floor(set.durationSec / 60) : "";
+    const sec = set.durationSec != null ? set.durationSec % 60 : "";
+    return `
+      <div class="set-row endurance" data-b="${bi}" data-s="${si}">
+        <div class="set-no">${si + 1}</div>
+        <input type="number" data-f="min" inputmode="numeric" placeholder="分"  value="${v(min)}" min="0">
+        <input type="number" data-f="sec" inputmode="numeric" placeholder="秒"  value="${v(sec)}" min="0" max="59">
+        <input type="number" data-f="km"  inputmode="decimal" placeholder="km" value="${v(set.distanceKm)}" min="0" step="0.01">
+        <input type="number" data-f="rpe" inputmode="decimal" placeholder="RPE" value="${v(set.rpe)}" min="1" max="10" step="0.5">
+        <div class="del-cell"><button data-act="del-set" data-b="${bi}" data-s="${si}" aria-label="削除">×</button></div>
+      </div>`;
+  }
+  // strength
+  return `
+    <div class="set-row strength" data-b="${bi}" data-s="${si}">
+      <div class="set-no">${si + 1}</div>
+      <input type="number" data-f="weight" inputmode="decimal" placeholder="kg"  value="${v(set.weightKg)}" min="0" step="0.5">
+      <input type="number" data-f="reps"   inputmode="numeric" placeholder="回"  value="${v(set.reps)}" min="0">
+      <input type="number" data-f="rpe"    inputmode="decimal" placeholder="RPE" value="${v(set.rpe)}" min="1" max="10" step="0.5">
+      <div class="uni-cell"><input type="checkbox" data-f="uni" ${set.isUnilateral ? "checked" : ""} aria-label="片側"></div>
+      <div class="del-cell"><button data-act="del-set" data-b="${bi}" data-s="${si}" aria-label="削除">×</button></div>
+    </div>`;
+}
+
+// 種目ブロックの HTML
+function blockHTML(block, bi) {
+  const ex = getExercise(block.exerciseId);
+  if (!ex) return "";
+  const kindLabel = ex.kind === "strength" ? "筋力" : "持久";
+
+  const head = ex.kind === "endurance"
+    ? `<div class="set-head endurance"><span>#</span><span>分</span><span>秒</span><span>km</span><span>RPE</span><span></span></div>`
+    : `<div class="set-head strength"><span>#</span><span>kg</span><span>回</span><span>RPE</span><span>片側</span><span></span></div>`;
+
+  const rows = block.sets.map((s, si) => setRowHTML(ex, s, bi, si)).join("");
+
+  return `
+    <div class="card ex-block">
+      <div class="ex-block-head">
+        <div class="ex-block-name">${esc(ex.name)}<span class="badge">${kindLabel}</span></div>
+        <button class="btn btn-sm btn-danger" data-act="del-block" data-b="${bi}">種目を外す</button>
+      </div>
+      ${head}
+      ${rows}
+      <button class="add-set" data-act="add-set" data-b="${bi}">＋ セットを追加</button>
+    </div>`;
+}
+
+// 編集画面全体を描画
+function renderWorkoutEditor() {
+  const d = editingWorkout;
+  const blocks = d.blocks.map((b, i) => blockHTML(b, i)).join("");
+
+  const body = d.blocks.length === 0
+    ? `<div class="empty">「＋ 種目を追加」から種目を選んでください。<br>前回の記録が自動で入ります。</div>`
+    : blocks;
+
+  view.innerHTML = `
+    <div class="editor-bar">
+      <button class="btn btn-sm" data-act="cancel-editor">キャンセル</button>
+      <span class="title">${d._isNew ? "ワークアウト記録" : "ワークアウト編集"}</span>
+      <button class="btn btn-sm btn-primary" data-act="save-workout">保存</button>
+    </div>
+
+    <section class="section">
+      <label class="field">
+        <span>日付</span>
+        <input type="date" id="wo-date" value="${esc(d.date)}">
+      </label>
+      <label class="field">
+        <span>トレーニング時間（分）</span>
+        <input type="number" id="wo-duration" class="num" inputmode="numeric"
+               placeholder="例: 60" value="${d.durationMin ?? ""}" min="0">
+      </label>
+      <label class="field">
+        <span>メモ（任意）</span>
+        <input type="text" id="wo-memo" value="${esc(d.memo)}" placeholder="体調・環境など">
+      </label>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2 class="section-title">種目</h2></div>
+      ${body}
+      <button class="btn btn-block" data-act="pick-exercise" style="margin-top:10px">＋ 種目を追加</button>
+    </section>
+
+    <section class="section">
+      ${d._isNew ? "" : `<button class="btn btn-danger btn-block" data-act="delete-workout">このワークアウトを削除</button>`}
+    </section>`;
+
+  window.scrollTo(0, 0);
+}
+
+// 種目ピッカー（アクティブな種目のみ・検索可）
+function openExercisePicker() {
+  syncEditorToDraft();   // ピッカーを開く前に入力を保全
+  const render = (keyword) => {
+    const kw = (keyword || "").trim().toLowerCase();
+    const items = db.exercises
+      .filter((e) => e.isActive)
+      .filter((e) => !kw || e.name.toLowerCase().includes(kw));
+
+    const list = items.length === 0
+      ? `<div class="empty">該当する種目がありません。<br>「種目」タブで追加できます。</div>`
+      : items.map((e) => {
+          const kindLabel = e.kind === "strength" ? "筋力" : "持久";
+          const last = lastRecordLabel(e.id);
+          return `
+            <button class="picker-item" data-act="add-ex-to-wo" data-id="${e.id}">
+              <span>${esc(e.name)}</span>
+              <span class="p-meta">${kindLabel}${last ? "・記録あり" : "・記録なし"}</span>
+            </button>`;
+        }).join("");
+
+    document.getElementById("picker-list").innerHTML = list;
+  };
+
+  document.getElementById("modal-root").innerHTML = `
+    <div class="modal-backdrop" data-act="close-modal">
+      <div class="modal" role="dialog" aria-modal="true">
+        <h3>種目を追加</h3>
+        <input type="text" id="picker-search" class="picker-search" placeholder="種目名で絞り込み" autocomplete="off">
+        <div class="picker-list" id="picker-list"></div>
+        <button class="btn btn-block" data-act="close-modal" style="margin-top:10px">閉じる</button>
+      </div>
+    </div>`;
+
+  const search = document.getElementById("picker-search");
+  search.addEventListener("input", (e) => render(e.target.value));
+  render("");
+}
+
+
+/* ---------- タブ切り替え / 全体描画 ---------- */
 function render() {
+  // 編集中なら編集画面を優先（タブとは独立した「画面」）
+  if (editingWorkout) { renderWorkoutEditor(); renderStorageStatus(); return; }
+
   document.querySelectorAll("#tabbar button").forEach((b) => {
     if (b.dataset.tab === currentTab) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
@@ -877,10 +1371,17 @@ document.addEventListener("click", (ev) => {
     case "export-csv":  exportCSV(); break;
     case "import-json": document.getElementById("import-file").click(); break;
 
-    case "new-workout":
-      // フェーズ2で実装する
-      alert("ワークアウト記録画面は次のフェーズで実装します。");
-      break;
+    // ---- ワークアウト編集（フェーズ2） ----
+    case "new-workout":    startNewWorkout(); break;
+    case "edit-workout":   startEditWorkout(el.dataset.id); break;
+    case "cancel-editor":  cancelEditor(); break;
+    case "save-workout":   saveWorkout(); break;
+    case "delete-workout": deleteWorkout(); break;
+    case "pick-exercise":  openExercisePicker(); break;
+    case "add-ex-to-wo":   addExerciseToDraft(el.dataset.id); break;
+    case "add-set":        addSetRow(Number(el.dataset.b)); break;
+    case "del-set":        removeSetRow(Number(el.dataset.b), Number(el.dataset.s)); break;
+    case "del-block":      removeBlock(Number(el.dataset.b)); break;
   }
 });
 
